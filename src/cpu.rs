@@ -1,13 +1,13 @@
 #[derive(Default, Debug)]
 pub struct Registers {
-    pub a: u8,
-    pub f: u8,
-    pub b: u8,
-    pub c: u8,
-    pub d: u8,
-    pub e: u8,
-    pub h: u8,
-    pub l: u8,
+    a: u8,
+    f: u8,
+    b: u8,
+    c: u8,
+    d: u8,
+    e: u8,
+    h: u8,
+    l: u8,
 }
 
 #[derive(Debug)]
@@ -18,6 +18,16 @@ pub enum Flag {
     C,    // Carry flag
 }
 
+pub enum SingleRegister {
+    A,
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+}
+
 pub enum DoubleRegister {
     AF,
     BC,
@@ -26,6 +36,42 @@ pub enum DoubleRegister {
 }
 
 impl Registers {
+    pub fn new() -> Self {
+        Registers {
+            a: 0,
+            f: 0,
+            b: 0,
+            c: 0,
+            d: 0,
+            e: 0,
+            h: 0,
+            l: 0,
+        }
+    }
+    pub fn get_single_register(&self, reg: &SingleRegister) -> u8 {
+        match reg {
+            SingleRegister::A => self.a,
+            SingleRegister::B => self.b,
+            SingleRegister::C => self.c,
+            SingleRegister::D => self.d,
+            SingleRegister::E => self.e,
+            SingleRegister::H => self.h,
+            SingleRegister::L => self.l,
+        }
+    }
+
+    pub fn set_single_register(&mut self, reg: &SingleRegister, value: u8) {
+        match reg {
+            SingleRegister::A => self.a = value,
+            SingleRegister::B => self.b = value,
+            SingleRegister::C => self.c = value,
+            SingleRegister::D => self.d = value,
+            SingleRegister::E => self.e = value,
+            SingleRegister::H => self.h = value,
+            SingleRegister::L => self.l = value,
+        }
+    }
+
     pub fn get_flag_bit(&self, flag: Flag) -> u8 {
         match flag {
             Flag::Zero => (self.f >> 7) & 1,
@@ -145,26 +191,34 @@ impl Cpu {
         registers.set_flag_bit(Flag::C, carry_flag);
         self.increment_clock(1);
     }
-    fn inc_r(&mut self, registers: &mut Registers, register: &mut u8) {
-    
-        let half_carry = (*register & 0x0F) == 0x0F;
-        *register = register.wrapping_add(1);
-    
-        registers.set_flag_bit(Flag::Zero, if *register == 0 { 1 } else { 0 });
+    fn inc_r(&mut self, registers: &mut Registers, register_name: SingleRegister) {
+        let mut val = registers.get_single_register(&register_name);
+
+        let half_carry = (val & 0x0F) == 0x0F;
+        val = val.wrapping_add(1);
+
+        registers.set_flag_bit(Flag::Zero, if val == 0 { 1 } else { 0 });
         registers.set_flag_bit(Flag::N, 0);
         registers.set_flag_bit(Flag::H, if half_carry { 1 } else { 0 });
-    
+
+        registers.set_single_register(&register_name, val);
+
         self.increment_clock(1);
     }
 
-    fn dec_r(&mut self, registers: &mut Registers, register: &mut u8) {
-        let half_borrow = (*register & 0x0F) == 0; // Check for half-borrow
-        *register = register.wrapping_sub(1); // Decrement with wrapping
+    fn dec_r(&mut self, registers: &mut Registers, register_name: SingleRegister) {
+        let mut val = registers.get_single_register(&register_name);
+
+        let half_borrow = (val & 0x0F) == 0; // Check for half-borrow
+        val = val.wrapping_sub(1); // Decrement with wrapping
 
         // Update flags using the `Registers` methods
-        registers.set_flag_bit(Flag::Zero, if *register == 0 { 1 } else { 0 });
+        registers.set_flag_bit(Flag::Zero, if val == 0 { 1 } else { 0 });
         registers.set_flag_bit(Flag::N, 1); // Set Subtract (N) flag
         registers.set_flag_bit(Flag::H, if half_borrow { 1 } else { 0 }); // Set Half-Carry (H) flag
+
+        registers.set_single_register(&register_name, val);
+        self.increment_clock(1);
     }
 
     fn inc_rr(&mut self, registers: &mut Registers, register_pair: DoubleRegister) {
@@ -277,7 +331,6 @@ impl Cpu {
         self.increment_clock(2);
     }
 
-
     fn rlca(&mut self, registers: &mut Registers) {
         // RLCA
         let carry = registers.a & 0x80;
@@ -328,7 +381,7 @@ impl Cpu {
         */
         self.increment_clock(1);
     }
-    fn ld_de_a(&mut self) {
+    fn ld_de_a(&mut self, registers: &mut Registers) {
         // LD (DE), A
         self.write_memory(registers.de(), registers.a);
         self.increment_clock(2);
@@ -359,32 +412,33 @@ impl Cpu {
         self.increment_clock(3);
     }
 
-    fn ld_a_de(&mut self) {
+    fn ld_a_de(&mut self, registers: &mut Registers) {
         let addr = registers.de();
         registers.a = self.read_memory(addr);
         self.increment_clock(2);
     }
 
-    fn rra(&mut self) {
-        /*Rotate the contents of register A to the right, through the carry (CY) flag.
+    fn rra(&mut self, registers: &mut Registers) {
+        /* Rotate the contents of register A to the right, through the carry (CY) flag.
         That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy) are copied to bit 5.
         The same operation is repeated in sequence for the rest of the register.
         The previous contents of the carry flag are copied to bit 7. */
-        let carry = registers.f & 0b00010000;
-        registers.f &= 0b00001111; // Clear all flags except for H
-        if carry != 0 {
-            registers.f |= 0b00010000; // Set C flag
-        }
-        registers.a = (registers.a >> 1) | (carry << 4);
-        if registers.a == 0 {
-            registers.f |= 0b10000000; // Set Z flag
-        }
-        if (registers.a & 0x0F) == 0x0F {
-            registers.f |= 0b00100000; // Set H flag
-        }
+
+        let carry = registers.is_flag_set(Flag::C) as u8; // Get the current carry flag (1 or 0)
+        let new_carry = registers.a & 0x01; // Save the least significant bit (LSB) as the new carry
+        registers.a = (registers.a >> 1) | (carry << 7); // Rotate right and insert the old carry into bit 7
+
+        // Update the carry flag
+        registers.set_flag_bit(Flag::C, new_carry);
+
+        // Clear the Zero, Subtract, and Half-Carry flags
+        registers.set_flag_bit(Flag::Zero, 0);
+        registers.set_flag_bit(Flag::N, 0);
+        registers.set_flag_bit(Flag::H, 0);
+
         self.increment_clock(1);
     }
-    fn jr_nz_s8(&mut self) {
+    fn jr_nz_s8(&mut self, registers: &mut Registers) {
         // JR NZ, s8
         let offset = self.fetch() as i8;
         if (registers.f & 0b10000000) == 0 {
@@ -393,13 +447,12 @@ impl Cpu {
         self.increment_clock(3);
     }
 
-    fn ld_hl_plus_a(&mut self) {
+    fn ld_hl_plus_a(&mut self, registers: &mut Registers) {
         // LD (HL+), A
         self.write_memory(registers.hl(), registers.a);
         registers.set_hl(registers.hl().wrapping_add(1));
         self.increment_clock(2);
     }
-
 
     fn daa(&mut self, registers: &mut Registers) {
         /* Adjust the accumulator (register A) to a binary-coded decimal (BCD) number
@@ -428,7 +481,7 @@ impl Cpu {
             0x02 => self.ld_bc_a(registers),
             0x03 => self.inc_rr(registers, DoubleRegister::BC),
             0x04 => self.inc_r(registers, SingleRegister::B),
-            0x05 => self.dec_r(registers, &mut registers.b),
+            0x05 => self.dec_r(registers, SingleRegister::B),
             0x06 => self.ld_r_n(&mut registers.b),
             0x07 => self.rlca(registers),
             0x08 => self.ld_a16_sp(),
@@ -436,33 +489,33 @@ impl Cpu {
             0x0A => self.ld_a_bc(registers),
             0x0B => self.dec_rr(registers, DoubleRegister::BC),
             0x0C => self.inc_r(registers, SingleRegister::C),
-            0x0D => self.dec_r(registers, &mut registers.c),
+            0x0D => self.dec_r(registers, SingleRegister::C),
             0x0E => self.ld_r_n(&mut registers.c),
             0x0F => self.rrca(registers),
 
             0x10 => self.stop(),
             0x11 => self.ld_rr_nn(registers, DoubleRegister::DE),
-            0x12 => self.ld_de_a(),
+            0x12 => self.ld_de_a(registers),
             0x13 => self.inc_rr(registers, DoubleRegister::DE),
             0x14 => self.inc_r(registers, SingleRegister::D),
-            0x15 => self.dec_r(registers, &mut registers.d),
+            0x15 => self.dec_r(registers, SingleRegister::D),
             0x16 => self.ld_r_n(&mut registers.d),
             0x17 => self.rla(registers),
             0x18 => self.jr_s8(),
             0x19 => self.add_hl_rr(registers, DoubleRegister::DE),
-            0x1A => self.ld_a_de(),
+            0x1A => self.ld_a_de(registers),
             0x1B => self.dec_rr(registers, DoubleRegister::DE),
-            0x1C => self.inc_r(registers, &mut registers.e),
-            0x1D => self.dec_r(registers, &mut registers.e),
+            0x1C => self.inc_r(registers, SingleRegister::E),
+            0x1D => self.dec_r(registers, SingleRegister::E),
             0x1E => self.ld_r_n(&mut registers.e),
-            0x1F => self.rra(),
+            0x1F => self.rra(registers),
 
-            0x20 => self.jr_nz_s8(),
+            0x20 => self.jr_nz_s8(registers),
             0x21 => self.ld_rr_nn(registers, DoubleRegister::HL),
-            0x22 => self.ld_hl_plus_a(),
+            0x22 => self.ld_hl_plus_a(registers),
             0x23 => self.inc_rr(registers, DoubleRegister::HL),
-            0x24 => self.inc_r(registers, &mut registers.h),
-            0x25 => self.dec_r(registers, &mut registers.h),
+            0x24 => self.inc_r(registers, SingleRegister::H),
+            0x25 => self.dec_r(registers, SingleRegister::H),
             0x26 => self.ld_r_n(&mut registers.h),
             0x27 => self.daa(registers),
 
