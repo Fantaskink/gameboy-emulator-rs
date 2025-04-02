@@ -526,6 +526,16 @@ impl Cpu {
         registers.set_single_register(&register, value);
         self.increment_clock(2);
     }
+    fn ld_hl_r(&mut self, registers: &mut Registers, register: SingleRegister) {
+        // LD (HL), r
+        let value = registers.get_single_register(&register);
+        self.write_memory(registers.hl(), value);
+        self.increment_clock(2);
+    }
+    fn halt(&mut self) {
+        // HALT
+        // TODO: Implement HALT instruction
+    }
     fn execute(&mut self, opcode: u8, registers: &mut Registers) {
         match opcode {
             0x00 => self.nop(),
@@ -616,7 +626,38 @@ impl Cpu {
             0x5D => self.ld_r_r(registers, SingleRegister::E, SingleRegister::L),
             0x5E => self.ld_r_hl(registers, SingleRegister::E),
             0x5F => self.ld_r_r(registers, SingleRegister::E, SingleRegister::A),
-
+            0x60 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::B),
+            0x61 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::C),
+            0x62 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::D),
+            0x63 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::E),
+            0x64 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::H),
+            0x65 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::L),
+            0x66 => self.ld_r_hl(registers, SingleRegister::H),
+            0x67 => self.ld_r_r(registers, SingleRegister::H, SingleRegister::A),
+            0x68 => self.ld_r_r(registers, SingleRegister::L, SingleRegister::B),
+            0x69 => self.ld_r_r(registers, SingleRegister::L, SingleRegister::C),
+            0x6A => self.ld_r_r(registers, SingleRegister::L, SingleRegister::D),
+            0x6B => self.ld_r_r(registers, SingleRegister::L, SingleRegister::E),
+            0x6C => self.ld_r_r(registers, SingleRegister::L, SingleRegister::H),
+            0x6D => self.ld_r_r(registers, SingleRegister::L, SingleRegister::L),
+            0x6E => self.ld_r_hl(registers, SingleRegister::L),
+            0x6F => self.ld_r_r(registers, SingleRegister::L, SingleRegister::A),
+            0x70 => self.ld_hl_r(registers, SingleRegister::B),
+            0x71 => self.ld_hl_r(registers, SingleRegister::C),
+            0x72 => self.ld_hl_r(registers, SingleRegister::D),
+            0x73 => self.ld_hl_r(registers, SingleRegister::E),
+            0x74 => self.ld_hl_r(registers, SingleRegister::H),
+            0x75 => self.ld_hl_r(registers, SingleRegister::L),
+            0x76 => self.halt(),
+            0x77 => self.ld_hl_r(registers, SingleRegister::A),
+            0x78 => self.ld_r_r(registers, SingleRegister::A, SingleRegister::B),
+            0x79 => self.ld_r_r(registers, SingleRegister::A, SingleRegister::C),
+            0x7A => self.ld_r_r(registers, SingleRegister::A, SingleRegister::D),
+            0x7B => self.ld_r_r(registers, SingleRegister::A, SingleRegister::E),
+            0x7C => self.ld_r_r(registers, SingleRegister::A, SingleRegister::H),
+            0x7D => self.ld_r_r(registers, SingleRegister::A, SingleRegister::L),
+            0x7E => self.ld_r_hl(registers, SingleRegister::A),
+            0x7F => self.ld_r_r(registers, SingleRegister::A, SingleRegister::A),
             0x80 => self.add_a_r(registers, SingleRegister::B),
             0x81 => self.add_a_r(registers, SingleRegister::C),
             0x82 => self.add_a_r(registers, SingleRegister::D),
