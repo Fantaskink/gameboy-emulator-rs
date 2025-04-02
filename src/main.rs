@@ -1,4 +1,4 @@
-use gameboy_emulator_rs::Cpu;
+use gameboy_emulator_rs::{Cpu, Registers};
 use std::fs;
 
 fn load_rom(file_path: &str) -> Vec<u8> {
