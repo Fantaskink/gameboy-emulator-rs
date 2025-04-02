@@ -168,6 +168,7 @@ impl Cpu {
     }
 
     fn inc_rr(&mut self, registers: &mut Registers, register_pair: DoubleRegister) {
+        // INC rr: Increment a 16-bit register pair
         let (high, low) = match register_pair {
             DoubleRegister::AF => (registers.a, registers.f),
             DoubleRegister::BC => (registers.b, registers.c),
@@ -181,14 +182,14 @@ impl Cpu {
     }
 
     fn ld_r_n(&mut self, register: &mut u8) {
-        // LD r, n
+        // LD r, n: Load an 8-bit immediate value into a register
         let value = self.fetch();
         *register = value;
         self.increment_clock(2);
     }
 
     fn ld_rr_nn(&mut self, registers: &mut Registers, register_pair: DoubleRegister) {
-        // LD rr, nn
+        // LD rr, nn: Load a 16-bit immediate value into a register pair
         let nn_lsb = self.fetch();
         let nn_msb = self.fetch();
         let nn = ((nn_lsb as u16) << 8) | (nn_msb as u16);
@@ -200,6 +201,31 @@ impl Cpu {
             DoubleRegister::HL => registers.set_hl(nn),
         }
         self.increment_clock(3);
+    }
+
+    fn add_hl_rr(&mut self, registers: &mut Registers, register_pair: DoubleRegister) {
+        // ADD HL, rr: Add a 16-bit register pair to HL
+        let hl = registers.hl();
+        let rr = match register_pair {
+            DoubleRegister::AF => registers.af(),
+            DoubleRegister::BC => registers.bc(),
+            DoubleRegister::DE => registers.de(),
+            DoubleRegister::HL => registers.hl(),
+        };
+        let (result, carry) = hl.overflowing_add(rr);
+        let half_carry = ((hl & 0x0FFF) + (rr & 0x0FFF)) > 0x0FFF;
+        registers.set_hl(result);
+        registers.f &= 0b00010000; // Clear N flag
+        if result == 0 {
+            registers.f |= 0b10000000; // Set Z flag
+        }
+        if half_carry {
+            registers.f |= 0b00100000; // Set H flag
+        }
+        if carry {
+            registers.f |= 0b00010000; // Set C flag
+        }
+        self.increment_clock(2);
     }
 
     fn inc_sp(&mut self) {
@@ -261,25 +287,7 @@ impl Cpu {
         self.write_memory(addr + 1, high_byte);
         self.increment_clock(5);
     }
-    fn add_hl_bc(&mut self) {
-        // ADD HL, BC
-        let hl = registers.hl();
-        let bc = registers.bc();
-        let (result, carry) = hl.overflowing_add(bc);
-        let half_carry = ((hl & 0x0FFF) + (bc & 0x0FFF)) > 0x0FFF;
-        registers.set_hl(result);
-        registers.f &= 0b00010000; // Clear N flag
-        if result == 0 {
-            registers.f |= 0b10000000; // Set Z flag
-        }
-        if half_carry {
-            registers.f |= 0b00100000; // Set H flag
-        }
-        if carry {
-            registers.f |= 0b00010000; // Set C flag
-        }
-        self.increment_clock(2);
-    }
+
     fn ld_a_bc(&mut self) {
         // LD A, (BC)
         let addr = registers.bc();
@@ -341,25 +349,7 @@ impl Cpu {
         self.pc = self.pc.wrapping_add(offset as u16);
         self.increment_clock(3);
     }
-    fn add_hl_de(&mut self) {
-        // ADD HL, DE
-        let hl = registers.hl();
-        let de = registers.de();
-        let (result, carry) = hl.overflowing_add(de);
-        let half_carry = ((hl & 0x0FFF) + (de & 0x0FFF)) > 0x0FFF;
-        registers.set_hl(result);
-        registers.f &= 0b00010000; // Clear N flag
-        if result == 0 {
-            registers.f |= 0b10000000; // Set Z flag
-        }
-        if half_carry {
-            registers.f |= 0b00100000; // Set H flag
-        }
-        if carry {
-            registers.f |= 0b00010000; // Set C flag
-        }
-        self.increment_clock(2);
-    }
+
     fn ld_a_de(&mut self) {
         let addr = registers.de();
         registers.a = self.read_memory(addr);
@@ -437,7 +427,7 @@ impl Cpu {
             0x06 => self.ld_r_n(&mut registers.b),
             0x07 => self.rlca(registers),
             0x08 => self.ld_a16_sp(),
-            0x09 => self.add_hl_bc(),
+            0x09 => self.add_hl_rr(registers, DoubleRegister::BC),
             0x0A => self.ld_a_bc(),
             0x0B => self.dec_bc(),
             0x0C => self.inc_r(registers, SingleRegister::C),
@@ -454,7 +444,7 @@ impl Cpu {
             0x16 => self.ld_r_n(&mut registers.d),
             0x17 => self.rla(registers),
             0x18 => self.jr_s8(),
-            0x19 => self.add_hl_de(),
+            0x19 => self.add_hl_rr(registers, DoubleRegister::DE),
             0x1A => self.ld_a_de(),
             0x1B => self.dec_de(),
             0x1C => self.inc_r(registers, &mut registers.e),
