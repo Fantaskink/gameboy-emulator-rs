@@ -181,6 +181,20 @@ impl Cpu {
         self.increment_clock(2);
     }
 
+    fn dec_rr(&mut self, registers: &mut Registers, register_pair: DoubleRegister) {
+        // DEC rr: Decrement a 16-bit register pair
+        let (high, low) = match register_pair {
+            DoubleRegister::AF => (registers.a, registers.f),
+            DoubleRegister::BC => (registers.b, registers.c),
+            DoubleRegister::DE => (registers.d, registers.e),
+            DoubleRegister::HL => (registers.h, registers.l),
+        };
+
+        let result = ((high as u16) << 8 | low as u16).wrapping_sub(1);
+        registers.set_hl(result);
+        self.increment_clock(2);
+    }
+
     fn ld_r_n(&mut self, register: &mut u8) {
         // LD r, n: Load an 8-bit immediate value into a register
         let value = self.fetch();
@@ -288,15 +302,10 @@ impl Cpu {
         self.increment_clock(5);
     }
 
-    fn ld_a_bc(&mut self) {
+    fn ld_a_bc(&mut self, registers: &mut Registers) {
         // LD A, (BC)
         let addr = registers.bc();
         registers.a = self.read_memory(addr);
-        self.increment_clock(2);
-    }
-    fn dec_bc(&mut self) {
-        // DEC BC
-        registers.set_bc(registers.bc().wrapping_sub(1));
         self.increment_clock(2);
     }
     fn rrca(&mut self, registers: &mut Registers) {
@@ -355,11 +364,7 @@ impl Cpu {
         registers.a = self.read_memory(addr);
         self.increment_clock(2);
     }
-    fn dec_de(&mut self) {
-        // DEC DE
-        registers.set_de(registers.de().wrapping_sub(1));
-        self.increment_clock(2);
-    }
+
     fn rra(&mut self) {
         /*Rotate the contents of register A to the right, through the carry (CY) flag.
         That is, the contents of bit 7 are copied to bit 6, and the previous contents of bit 6 (before the copy) are copied to bit 5.
@@ -428,8 +433,8 @@ impl Cpu {
             0x07 => self.rlca(registers),
             0x08 => self.ld_a16_sp(),
             0x09 => self.add_hl_rr(registers, DoubleRegister::BC),
-            0x0A => self.ld_a_bc(),
-            0x0B => self.dec_bc(),
+            0x0A => self.ld_a_bc(registers),
+            0x0B => self.dec_rr(registers, DoubleRegister::BC),
             0x0C => self.inc_r(registers, SingleRegister::C),
             0x0D => self.dec_r(registers, &mut registers.c),
             0x0E => self.ld_r_n(&mut registers.c),
@@ -446,7 +451,7 @@ impl Cpu {
             0x18 => self.jr_s8(),
             0x19 => self.add_hl_rr(registers, DoubleRegister::DE),
             0x1A => self.ld_a_de(),
-            0x1B => self.dec_de(),
+            0x1B => self.dec_rr(registers, DoubleRegister::DE),
             0x1C => self.inc_r(registers, &mut registers.e),
             0x1D => self.dec_r(registers, &mut registers.e),
             0x1E => self.ld_r_n(&mut registers.e),
