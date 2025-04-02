@@ -8,6 +8,7 @@ pub struct Registers {
     e: u8,
     h: u8,
     l: u8,
+    sp: u16,
 }
 
 #[derive(Debug)]
@@ -33,6 +34,7 @@ pub enum DoubleRegister {
     BC,
     DE,
     HL,
+    SP,
 }
 
 impl Registers {
@@ -46,6 +48,7 @@ impl Registers {
             e: 0,
             h: 0,
             l: 0,
+            sp: 0xFFFE,
         }
     }
     pub fn get_single_register(&self, reg: &SingleRegister) -> u8 {
@@ -155,7 +158,6 @@ impl Registers {
 #[derive(Debug)]
 pub struct Cpu {
     pub pc: u16,
-    pub sp: u16,
     pub memory: [u8; 0x10000], // 64KB memory
     pub cycles: u64,           // T-cycles
 }
@@ -164,7 +166,6 @@ impl Default for Cpu {
     fn default() -> Self {
         Cpu {
             pc: 0x100, // Start at 0x100 for ROM
-            sp: 0xFFFE,
             memory: [0; 0x10000],
             cycles: 0,
         }
@@ -175,20 +176,20 @@ impl Cpu {
     pub fn new() -> Self {
         Cpu::default()
     }
-    fn add_r(&mut self, registers: &mut Registers, register: &mut u8, value: u8) {
-        let (result, carry) = register.overflowing_add(value);
-        let half_carry = ((*register & 0x0F) + (value & 0x0F)) > 0x0F;
+    fn add_a_r(&mut self, registers: &mut Registers, register_name: SingleRegister) {
+        // ADD A, r
+        let val = registers.get_single_register(&register_name);
 
-        *register = result;
+        let (result, carry) = registers.a.overflowing_add(val);
+        let half_carry = ((registers.a & 0x0F) + (val & 0x0F)) > 0x0F;
+        registers.a = result;
+        registers.set_flag_bit(Flag::Zero, if result == 0 { 1 } else { 0 });
+        registers.set_flag_bit(Flag::N, 0); // Clear Subtract (N) flag
+        registers.set_flag_bit(Flag::H, if half_carry { 1 } else { 0 }); // Set Half-Carry (H) flag
+        registers.set_flag_bit(Flag::C, if carry { 1 } else { 0 }); // Set Carry (C) flag
 
-        let zero_flag = if result == 0 { 1 } else { 0 };
-        let carry_flag = if carry { 1 } else { 0 };
-        let half_carry_flag = if half_carry { 1 } else { 0 };
+        registers.set_single_register(&register_name, val);
 
-        registers.set_flag_bit(Flag::Zero, zero_flag);
-        registers.set_flag_bit(Flag::N, 0);
-        registers.set_flag_bit(Flag::H, half_carry_flag);
-        registers.set_flag_bit(Flag::C, carry_flag);
         self.increment_clock(1);
     }
     fn inc_r(&mut self, registers: &mut Registers, register_name: SingleRegister) {
@@ -228,6 +229,7 @@ impl Cpu {
             DoubleRegister::BC => (registers.b, registers.c),
             DoubleRegister::DE => (registers.d, registers.e),
             DoubleRegister::HL => (registers.h, registers.l),
+            DoubleRegister::SP => (registers.sp as u8, (registers.sp >> 8) as u8),
         };
 
         let result = ((high as u16) << 8 | low as u16).wrapping_add(1);
@@ -242,6 +244,7 @@ impl Cpu {
             DoubleRegister::BC => (registers.b, registers.c),
             DoubleRegister::DE => (registers.d, registers.e),
             DoubleRegister::HL => (registers.h, registers.l),
+            DoubleRegister::SP => (registers.sp as u8, (registers.sp >> 8) as u8),
         };
 
         let result = ((high as u16) << 8 | low as u16).wrapping_sub(1);
@@ -267,6 +270,7 @@ impl Cpu {
             DoubleRegister::BC => registers.set_bc(nn),
             DoubleRegister::DE => registers.set_de(nn),
             DoubleRegister::HL => registers.set_hl(nn),
+            DoubleRegister::SP => registers.sp = nn,
         }
         self.increment_clock(3);
     }
@@ -279,28 +283,32 @@ impl Cpu {
             DoubleRegister::BC => registers.bc(),
             DoubleRegister::DE => registers.de(),
             DoubleRegister::HL => registers.hl(),
+            DoubleRegister::SP => registers.sp,
         };
         let (result, carry) = hl.overflowing_add(rr);
         let half_carry = ((hl & 0x0FFF) + (rr & 0x0FFF)) > 0x0FFF;
         registers.set_hl(result);
-        registers.f &= 0b00010000; // Clear N flag
+
+        registers.set_flag_bit(Flag::N, 0); // Clear N flag
         if result == 0 {
-            registers.f |= 0b10000000; // Set Z flag
+            registers.set_flag_bit(Flag::Zero, 1); // Set Zero flag
         }
         if half_carry {
-            registers.f |= 0b00100000; // Set H flag
+            registers.set_flag_bit(Flag::H, 1); // Set Half-Carry flag
         }
         if carry {
-            registers.f |= 0b00010000; // Set C flag
+            registers.set_flag_bit(Flag::C, 1); // Set Carry flag
         }
         self.increment_clock(2);
     }
 
-    fn inc_sp(&mut self) {
-        self.sp = self.sp.wrapping_add(1); // Increment with wrapping
+    fn inc_sp(&mut self, registers: &mut Registers) {
+        registers.sp = registers.sp.wrapping_add(1); // Increment with wrapping
+        self.increment_clock(2);
     }
-    fn dec_sp(&mut self) {
-        self.sp = self.sp.wrapping_sub(1); // Decrement with wrapping
+    fn dec_sp(&mut self, registers: &mut Registers) {
+        registers.sp = registers.sp.wrapping_sub(1); // Decrement with wrapping
+        self.increment_clock(2);
     }
 
     fn increment_clock(&mut self, m_cycles: u64) {
@@ -333,20 +341,25 @@ impl Cpu {
 
     fn rlca(&mut self, registers: &mut Registers) {
         // RLCA
-        let carry = registers.a & 0x80;
-        registers.a = (registers.a << 1) | (carry >> 7);
-        if carry != 0 {
-            registers.f |= 0b00010000; // Set Carry (C) flag
-        } else {
-            registers.f &= !0b00010000; // Clear Carry (C) flag
-        }
+        /* Rotate the contents of register A to the left.
+        That is, the contents of bit 0 are copied to bit 1, and the previous contents of bit 1 (before the copy operation) are copied to bit 2.
+        The same operation is repeated in sequence for the rest of the register.
+        The contents of bit 7 are placed in both the CY flag and bit 0 of register A. */
+
+        let carry = registers.a & 0x80; // Get the most significant bit (MSB)
+        registers.a = (registers.a << 1) | (carry >> 7); // Rotate left
+        registers.set_flag_bit(Flag::C, carry >> 7); // Set Carry (C) flag
+        registers.set_flag_bit(Flag::Zero, if registers.a == 0 { 1 } else { 0 }); // Set Zero (Z) flag
+        registers.set_flag_bit(Flag::N, 0); // Clear Subtract (N) flag
+        registers.set_flag_bit(Flag::H, 0); // Clear Half-Carry (H) flag
+
         self.increment_clock(1);
     }
-    fn ld_a16_sp(&mut self) {
+    fn ld_a16_sp(&mut self, registers: &mut Registers) {
         // LD (a16), SP
         // Store the stack pointer (SP) at the address specified by the next two bytes
-        let low_byte = self.sp as u8;
-        let high_byte = (self.sp >> 8) as u8;
+        let low_byte = registers.sp as u8;
+        let high_byte = (registers.sp >> 8) as u8;
         let addr_lsb = self.fetch();
         let addr_msb = self.fetch();
         let addr = ((addr_lsb as u16) << 8) | (addr_msb as u16);
@@ -363,6 +376,7 @@ impl Cpu {
     }
     fn rrca(&mut self, registers: &mut Registers) {
         // RRCA
+
         let carry = registers.a & 0x01;
         registers.a = (registers.a >> 1) | (carry << 7);
         if carry != 0 {
@@ -441,7 +455,7 @@ impl Cpu {
     fn jr_nz_s8(&mut self, registers: &mut Registers) {
         // JR NZ, s8
         let offset = self.fetch() as i8;
-        if (registers.f & 0b10000000) == 0 {
+        if (registers.get_flag_bit(Flag::Zero)) == 0 {
             self.pc = self.pc.wrapping_add(offset as u16);
         }
         self.increment_clock(3);
@@ -474,6 +488,35 @@ impl Cpu {
 
         self.increment_clock(1);
     }
+    fn jr_z_s8(&mut self, registers: &mut Registers) {
+        // JR Z, s8
+        let offset = self.fetch() as i8;
+        if registers.get_flag_bit(Flag::Zero) != 0 {
+            self.pc = self.pc.wrapping_add(offset as u16);
+        }
+        self.increment_clock(3);
+    }
+    fn ld_a_hl_plus(&mut self, registers: &mut Registers) {
+        // LD A, (HL+)
+        registers.a = self.read_memory(registers.hl());
+        registers.set_hl(registers.hl().wrapping_add(1));
+        self.increment_clock(2);
+    }
+    fn cpl(&mut self, registers: &mut Registers) {
+        // CPL
+        registers.a = !registers.a; // Complement the accumulator
+        registers.set_flag_bit(Flag::N, 1); // Set Subtract (N) flag
+        registers.set_flag_bit(Flag::H, 1); // Set Half-Carry (H) flag
+        self.increment_clock(1);
+    }
+    fn jr_nc_s8(&mut self, registers: &mut Registers) {
+        // JR NC, s8
+        let offset = self.fetch() as i8;
+        if registers.get_flag_bit(Flag::C) == 0 {
+            self.pc = self.pc.wrapping_add(offset as u16);
+        }
+        self.increment_clock(3);
+    }
     fn execute(&mut self, opcode: u8, registers: &mut Registers) {
         match opcode {
             0x00 => self.nop(),
@@ -484,7 +527,7 @@ impl Cpu {
             0x05 => self.dec_r(registers, SingleRegister::B),
             0x06 => self.ld_r_n(&mut registers.b),
             0x07 => self.rlca(registers),
-            0x08 => self.ld_a16_sp(),
+            0x08 => self.ld_a16_sp(registers),
             0x09 => self.add_hl_rr(registers, DoubleRegister::BC),
             0x0A => self.ld_a_bc(registers),
             0x0B => self.dec_rr(registers, DoubleRegister::BC),
@@ -518,6 +561,17 @@ impl Cpu {
             0x25 => self.dec_r(registers, SingleRegister::H),
             0x26 => self.ld_r_n(&mut registers.h),
             0x27 => self.daa(registers),
+            0x28 => self.jr_z_s8(registers),
+            0x29 => self.add_hl_rr(registers, DoubleRegister::HL),
+            0x2A => self.ld_a_hl_plus(registers),
+            0x2B => self.dec_rr(registers, DoubleRegister::HL),
+            0x2C => self.inc_r(registers, SingleRegister::L),
+            0x2D => self.dec_r(registers, SingleRegister::L),
+            0x2E => self.ld_r_n(&mut registers.l),
+            0x2F => self.cpl(registers),
+
+            0x30 => self.jr_nc_s8(registers),
+            0x31 => self.ld_rr_nn(registers, DoubleRegister::SP),
 
             0x3E => {
                 // LD A, imm8 (Load an 8-bit immediate value into A)
