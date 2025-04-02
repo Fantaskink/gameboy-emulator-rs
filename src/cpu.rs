@@ -302,15 +302,6 @@ impl Cpu {
         self.increment_clock(2);
     }
 
-    fn inc_sp(&mut self, registers: &mut Registers) {
-        registers.sp = registers.sp.wrapping_add(1); // Increment with wrapping
-        self.increment_clock(2);
-    }
-    fn dec_sp(&mut self, registers: &mut Registers) {
-        registers.sp = registers.sp.wrapping_sub(1); // Decrement with wrapping
-        self.increment_clock(2);
-    }
-
     fn increment_clock(&mut self, m_cycles: u64) {
         self.cycles += m_cycles * 4; // 4 T-cycles per M-cycle
     }
@@ -517,6 +508,24 @@ impl Cpu {
         }
         self.increment_clock(3);
     }
+    fn ld_hl_minus_a(&mut self, registers: &mut Registers) {
+        // LD (HL-), A
+        self.write_memory(registers.hl(), registers.a);
+        registers.set_hl(registers.hl().wrapping_sub(1));
+        self.increment_clock(2);
+    }
+    fn ld_r_r(&mut self, registers: &mut Registers, dest: SingleRegister, src: SingleRegister) {
+        // LD r1, r2
+        let value = registers.get_single_register(&src);
+        registers.set_single_register(&dest, value);
+        self.increment_clock(1);
+    }
+    fn ld_r_hl(&mut self, registers: &mut Registers, register: SingleRegister) {
+        // LD r, (HL)
+        let value = self.read_memory(registers.hl());
+        registers.set_single_register(&register, value);
+        self.increment_clock(2);
+    }
     fn execute(&mut self, opcode: u8, registers: &mut Registers) {
         match opcode {
             0x00 => self.nop(),
@@ -572,54 +581,48 @@ impl Cpu {
 
             0x30 => self.jr_nc_s8(registers),
             0x31 => self.ld_rr_nn(registers, DoubleRegister::SP),
+            0x32 => self.ld_hl_minus_a(registers),
+            0x33 => self.inc_rr(registers, DoubleRegister::SP),
 
-            0x3E => {
-                // LD A, imm8 (Load an 8-bit immediate value into A)
-                let value = self.fetch();
-                registers.a = value;
-                self.increment_clock(4);
-            }
-            0x36 => {
-                // LD (HL), n: Load from immediate data (indirect HL)
-                let n = self.fetch();
-                self.write_memory(registers.hl(), n);
-                self.increment_clock(4);
-            }
-            0x41 => {
-                // LD B, C
-                registers.b = registers.c;
-                self.increment_clock(1);
-            }
-            0x46 => {
-                // LD B, (HL)
-                let memory = self.read_memory(registers.hl());
-                registers.b = memory;
-                self.increment_clock(2);
-            }
-            0x70 => {
-                // LD (HL), B
-                self.write_memory(registers.hl(), registers.b);
-                self.increment_clock(2);
-            }
-            0x80 => {
-                // ADD A, B
-                let (result, carry) = registers.a.overflowing_add(registers.b);
-                let half_carry = ((registers.a & 0x0F) + (registers.b & 0x0F)) > 0x0F;
+            0x40 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::B),
+            0x41 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::C),
+            0x42 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::D),
+            0x43 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::E),
+            0x44 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::H),
+            0x45 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::L),
+            0x46 => self.ld_r_hl(registers, SingleRegister::B),
+            0x47 => self.ld_r_r(registers, SingleRegister::B, SingleRegister::A),
+            0x48 => self.ld_r_r(registers, SingleRegister::C, SingleRegister::B),
+            0x49 => self.ld_r_r(registers, SingleRegister::C, SingleRegister::C),
+            0x4A => self.ld_r_r(registers, SingleRegister::C, SingleRegister::D),
+            0x4B => self.ld_r_r(registers, SingleRegister::C, SingleRegister::E),
+            0x4C => self.ld_r_r(registers, SingleRegister::C, SingleRegister::H),
+            0x4D => self.ld_r_r(registers, SingleRegister::C, SingleRegister::L),
+            0x4E => self.ld_r_hl(registers, SingleRegister::C),
+            0x4F => self.ld_r_r(registers, SingleRegister::C, SingleRegister::A),
+            0x50 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::B),
+            0x51 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::C),
+            0x52 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::D),
+            0x53 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::E),
+            0x54 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::H),
+            0x55 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::L),
+            0x56 => self.ld_r_hl(registers, SingleRegister::D),
+            0x57 => self.ld_r_r(registers, SingleRegister::D, SingleRegister::A),
+            0x58 => self.ld_r_r(registers, SingleRegister::E, SingleRegister::B),
+            0x59 => self.ld_r_r(registers, SingleRegister::E, SingleRegister::C),
+            0x5A => self.ld_r_r(registers, SingleRegister::E, SingleRegister::D),
+            0x5B => self.ld_r_r(registers, SingleRegister::E, SingleRegister::E),
+            0x5C => self.ld_r_r(registers, SingleRegister::E, SingleRegister::H),
+            0x5D => self.ld_r_r(registers, SingleRegister::E, SingleRegister::L),
+            0x5E => self.ld_r_hl(registers, SingleRegister::E),
+            0x5F => self.ld_r_r(registers, SingleRegister::E, SingleRegister::A),
 
-                registers.a = result;
-                registers.f = 0; // Clear all flags
-                if result == 0 {
-                    registers.f |= 0b10000000;
-                } // Set Z if result is 0
-                if half_carry {
-                    registers.f |= 0b00100000;
-                } // Set H if half-carry occurs
-                if carry {
-                    registers.f |= 0b00010000;
-                } // Set C if carry occurs
-
-                self.increment_clock(1);
-            }
+            0x80 => self.add_a_r(registers, SingleRegister::B),
+            0x81 => self.add_a_r(registers, SingleRegister::C),
+            0x82 => self.add_a_r(registers, SingleRegister::D),
+            0x83 => self.add_a_r(registers, SingleRegister::E),
+            0x84 => self.add_a_r(registers, SingleRegister::H),
+            0x85 => self.add_a_r(registers, SingleRegister::L),
             _ => panic!("Unknown opcode: {:#04x}", opcode),
         }
     }
